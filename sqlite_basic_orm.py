@@ -1,18 +1,20 @@
 #!/usr/bin/env python
-"""Elemetary sqlite3 ORM for python3.8+.
+"""Basic sqlite3 ORM for python3.8+.
+
 Gives ability to operate sqlite database as object or context manager object with list-input based methods.
-Created for jupyter notebook scripts. Doesn't fully support pandas, only lists.
+Compatible with IPython scripts. Limited support for pandas.
 Only simpliest SQL statements. There's no data checking and protection against SQL injection as well.
 Doesn't support table names and column names with space (' ') and aphostropes (') in it.
 """
+
 # %%
 import sqlite3
 
 __author__ = 'Dmitriy Sidov'
-__version__ = '0.1'
+__version__ = '0.2'
 __maintainer__ = 'Dmitriy Sidov'
 __email__ = 'dmitriy.sidov@gmail.com'
-__status__ = 'Under development'
+__status__ = 'Bug hunt time!'
 
 # %%
 class OpenDB:
@@ -58,88 +60,6 @@ class OpenDB:
             print(f'ERROR: {__name__}.commit. {e}') 
 
 
-    def count_rows(self, table_name, search_condition=None, prettify_return=True):
-        if search_condition is None: 
-            statement = f'''SELECT COUNT(*)\nFROM {table_name};'''
-        else:
-            statement = f'''SELECT COUNT(*)\nFROM {table_name}\nWHERE {search_condition};'''
-        try:
-            self.cursor.execute(statement)
-            result = self.cursor.fetchone()
-        except Exception as e:
-            print(f'ERROR: {__name__}.count_rows. {e}')
-            print(f'\nStatement:\n----------\n{statement}')
-            return None
-        else:
-            if prettify_return:
-                result = result[0]
-            return result
-
-
-    def create_table(self, table_name, column_data, unique=None, primary_key=None, foreign_key=None, custom_line=None, print_report=True, force_commit=True):
-        """
-        Parameters
-        ----------
-        :table_name: str
-        :column_data: str or list/tuple. Example: 'column_name1 data_type NOT NULL / DEFAULT 0'
-        :unique: str or list/tuple. Example: ['column_name1','column_name2']
-        :primary_key: str
-        :foreign_key_lists: list / list of lists : ['column_name1', 'reference_table', 'reference_column_name', 'additional actions']
-        :custom_line: str or list/tuple : add custom statement(s) to the end
-        :print_report: boolean. Print report about sucess (or not)
-        :force_commit: commit changes after statement execution
-        """
-        if isinstance(column_data,list) or isinstance(column_data,tuple):
-            column_data_f = ',\n\t'.join(column_data)
-        else:
-            column_data_f = column_data
-        statement = f'''CREATE TABLE {table_name} ({column_data_f}'''
-
-        if unique is not None:
-            if isinstance(unique,list) or isinstance(unique,tuple):
-                statement += f''',\n\tUNIQUE ({', '.join(unique)})'''
-            else:
-                statement += f',\n\tUNIQUE ({unique})'
-
-        if primary_key is not None:
-            statement += f',\n\tPRIMARY KEY ({primary_key})'
-
-        if foreign_key is not None:
-            if (isinstance(foreign_key[0],list) or isinstance(foreign_key[0],tuple)) and (len(foreign_key) > 1):
-                for keys in foreign_key:
-                    statement += f''',\n\tFOREIGN KEY ({keys[0]}) \n\tREFERENCES {keys[1]} ({keys[2]}) '''
-                    if len(keys) > 3:
-                        for i in range(3,len(keys)):
-                            statement += f'\n\t\t{keys[i]}'
-            else:
-                statement += f''',\n\tFOREIGN KEY ({foreign_key[0]}) \n\tREFERENCES {foreign_key[1]} ({foreign_key[2]}) '''
-                if len(foreign_key) > 3:
-                    for i in range(3,len(foreign_key)):
-                        statement += f'\n\t\t{foreign_key[i]}'
-
-        if custom_line is not None:
-            if isinstance(custom_line,list) or isinstance(custom_line,tuple):
-                for lines in custom_line:
-                    statement += f',\n\t{lines}'
-            else:
-                statement += f',\n\t{custom_line}'            
-
-        statement += '\n);'
-
-        try:
-            self.cursor.execute(statement)        
-        except Exception as e:
-            self.connection.rollback()
-            print(f'ERROR: {__name__}.create_table. {e}')
-            print(f'\nStatement:\n----------\n{statement}')
-        else:
-            if print_report:
-                print(f'SUCCESS: {__name__}.create_table.')
-                print(f'\nStatement:\n----------\n{statement}')
-            if force_commit:
-                self.commit()
-
-
     def tables(self, prettify_return=True):
         """
         Parameter
@@ -169,9 +89,16 @@ class OpenDB:
         return result
 
 
-    def execute(self, statement, prettify_return=True, print_report=True, force_commit=True):
+    def execute(self, statement, values=None, prettify_return=True, print_report=True, force_commit=True):
+        """
+        if values = None - excute(x=a)
+        if values is not None - execute(x=?, val)
+        """
         try:
-            self.cursor.execute(statement)
+            if values is None:
+                self.cursor.execute(statement)
+            else:
+                self.cursor.execute(statement, values)
             result = self.cursor.fetchall()
         except Exception as e:
             self.connection.rollback()
@@ -188,8 +115,112 @@ class OpenDB:
                 result = self._convert_tuple(result)
             return result
 
+    def execute_many(self, statement, values, prettify_return=True, print_report=True, force_commit=True):
+        """
+        statement: full SQL statement with ? on val places
+        """
+        try:
+            self.cursor.executemany(statement, values)
+            result = self.cursor.fetchall()
+        except Exception as e:
+            self.connection.rollback()
+            print(f'ERROR: {__name__}.execute_many. {e}')
+            print(f'\nStatement:\n----------\n{statement}')
+            return None
+        else:
+            if print_report:
+                print(f'SUCCESS: {__name__}.execute_many.')
+                print(f'\nStatement:\n----------\n{statement}')
+            if force_commit:
+                self.commit()
+            if prettify_return:
+                result = self._convert_tuple(result)
+            return result
 
-    def select(self, column_names, table_name, distinct=False, join=None, where=None, order_by=None, limit_offset=None, group_by=None, having=None, prettify_return=True, print_report=False, force_commit=True):
+    def count_rows(self, table_name, search_condition=None, prettify_return=True):
+        if search_condition is None: 
+            statement = f'''SELECT COUNT(*)\nFROM {table_name};'''
+        else:
+            statement = f'''SELECT COUNT(*)\nFROM {table_name}'''
+            if isinstance(search_condition,list) or isinstance(search_condition,tuple):
+                where_len = len(search_condition)
+                statement += f'''\nWHERE {search_condition[0]}''' 
+                
+            else:
+                statement += f'''\nWHERE {search_condition};''' 
+        try:
+            self.cursor.execute(statement)
+            result = self.cursor.fetchone()
+        except Exception as e:
+            print(f'ERROR: {__name__}.count_rows. {e}')
+            print(f'\nStatement:\n----------\n{statement}')
+            return None
+        else:
+            if prettify_return:
+                result = result[0]
+            return result
+          
+
+    def create_table(self, table_name, column_clauses, unique=None, primary_key=None, foreign_key=None, print_report=True, force_commit=True):
+        """
+        Parameters
+        ----------
+        :table_name: str
+        :column_clauses: str or list/tuple of str. Example: 'column_name1 data_type NOT NULL / DEFAULT 0'
+        :unique: str or list/tuple. Example: ['column_name1','column_name2']
+        :primary_key: str
+        :foreign_key_lists: list / list of lists : ['column_name1', 'reference_table', 'reference_column_name', 'additional actions']
+        :custom_line: str or list/tuple : add custom statement(s) to the end
+        :print_report: boolean. Print report about sucess (or not)
+        :force_commit: commit changes after statement execution
+        """
+        if isinstance(column_clauses,list) or isinstance(column_clauses,tuple):
+            if len(column_clauses) > 1:
+                column_data_f = ',\n\t'.join(column_clauses)
+            else: column_data_f = column_clauses[0]
+        else:
+            column_data_f = column_clauses
+        statement = f'''CREATE TABLE {table_name} ({column_data_f}'''
+
+        if unique is not None:
+            if isinstance(unique,list) or isinstance(unique,tuple):
+                statement += f''',\n\tUNIQUE ({', '.join(unique)})'''
+            else:
+                statement += f',\n\tUNIQUE ({unique})'
+
+        if primary_key is not None:
+            statement += f',\n\tPRIMARY KEY ({primary_key})'
+
+        if foreign_key is not None:
+            if (isinstance(foreign_key[0],list) or isinstance(foreign_key[0],tuple)) and (len(foreign_key) > 1):
+                for keys in foreign_key:
+                    statement += f''',\n\tFOREIGN KEY ({keys[0]}) \n\tREFERENCES {keys[1]} ({keys[2]}) '''
+                    if len(keys) > 3:
+                        for i in range(3,len(keys)):
+                            statement += f'\n\t\t{keys[i]}'
+            else:
+                statement += f''',\n\tFOREIGN KEY ({foreign_key[0]}) \n\tREFERENCES {foreign_key[1]} ({foreign_key[2]}) '''
+                if len(foreign_key) > 3:
+                    for i in range(3,len(foreign_key)):
+                        statement += f'\n\t\t{foreign_key[i]}'
+
+        statement += '\n);'
+
+        try:
+            self.cursor.execute(statement)        
+        except Exception as e:
+            self.connection.rollback()
+            print(f'ERROR: {__name__}.create_table. {e}')
+            print(f'\nStatement:\n----------\n{statement}')
+        else:
+            if print_report:
+                print(f'SUCCESS: {__name__}.create_table.')
+                print(f'\nStatement:\n----------\n{statement}')
+            if force_commit:
+                self.commit()
+
+
+    def select(self, table_name, column_names, distinct=False, join=None, where=None, order_by=None, limit_offset=None, group_by=None, having=None, prettify_return=True, print_report=False, force_commit=True):
         '''
         Parameters
         ----------
@@ -208,9 +239,13 @@ class OpenDB:
             statement = 'SELECT DISTINCT '
         else:
             statement = 'SELECT '
-
+        
         if isinstance(column_names,list) or isinstance(column_names,tuple):
-            statement += f'''{',\n\t'.join(column_names)}\nFROM {table_name}'''
+            if len(column_names) > 1:
+                column_names = ',\n\t'.join(column_names)
+            else:
+                column_names = column_names[0]
+            statement += f'''{column_names}\nFROM {table_name}'''
         else:
             statement += f'''{column_names}\nFROM {table_name}'''
 
@@ -223,31 +258,41 @@ class OpenDB:
 
         if where is not None:
             if (isinstance(where,list) or isinstance(where,tuple)):
+                where_len = len(where)
                 statement = f'''WHERE {where[0]}'''
-                for i in range(1,len(where)):
-                    statement += f'''\n\t{where[i]}'''
+                if where_len > 1:
+                    for i in range(1,len(where)):
+                        statement += f'''\n\tAND {where[i]}'''
             else:
                 statement += f'''WHERE {where}'''
 
         if order_by is not None:
             if (isinstance(order_by,list) or isinstance(order_by,tuple)):
+                order_len = len(order_by)
                 statement += f'''ORDER BY\n\t{order_by[0]}'''
-                for i in range(1,len(order_by)):
-                    statement += f''',\n\tAND {order_by[i]}'''
+                if order_len > 1:
+                    for i in range(1,order_len):
+                        statement += f''',\n\t{order_by[i]}'''
             else:
                 statement += f'''ORDER BY {order_by}'''
 
         if limit_offset is not None:
             if isinstance(limit_offset,list) or isinstance(limit_offset,tuple):
-                statement += f'''\nLIMIT {str(limit_offset[0])} OFFSET {str(limit_offset[1])}'''     
+                limit_len = len(limit_offset)
+                if limit_len > 1:
+                    statement += f'''\nLIMIT {str(limit_offset[0])} OFFSET {str(limit_offset[1])}''' 
+                else:
+                    statement += f'''\nLIMIT {str(limit_offset[0])}'''       
             else:
                 statement += f'''\nLIMIT {str(limit_offset)}'''
-
+                
         if group_by is not None:
             if (isinstance(group_by,list) or isinstance(group_by,tuple)):
+                group_len = len(group_by)
                 statement += f'''\nGROUP BY\n\t{group_by[0]}'''
-                for i in range(1,len(group_by)):
-                    statement += f''',\n\t{group_by[i]}'''
+                if group_len > 1:
+                    for i in range(1,group_len):
+                        statement += f''',\n\t{group_by[i]}'''
             else:
                 statement += f'''\nGROUP BY {order_by}'''
 
@@ -287,14 +332,19 @@ class OpenDB:
         if print_report:
             search_len = self.count_rows(prettify_return=True)
             values_len = len(values)
-
-        if isinstance(column_names,list) or isinstance(column_names,tuple): # todo - add case when 1 col & many vals
-            statement = f'''INSERT INTO {table_name} ({', '.join(column_names)})\nVALUES(?{',?'*(len(column_names)-1)})'''
-            if isinstance(values[0],list) or isinstance(values[0],tuple):
-                execute_many = True
+        if isinstance(column_names,list) or isinstance(column_names,tuple):
+            if len(column_names) > 1:
+                statement = f'''INSERT INTO {table_name} ({', '.join(column_names)})\nVALUES(?{',?'*(len(column_names)-1)})'''
+                if isinstance(values[0],list) or isinstance(values[0],tuple):
+                    execute_many = True
+            else: 
+                statement = f'''INSERT INTO {table_name} ({column_names})\nVALUES(?)'''
+                if isinstance(values,list) or isinstance(values,tuple):
+                    execute_many = True
         else:
             statement = f'''INSERT INTO {table_name} ({column_names})\nVALUES(?)'''
-            values = (values,)
+            if isinstance(values,str):
+                values = (values,)
         try:
             if execute_many:
                 self.cursor.executemany(statement, values)
@@ -313,59 +363,78 @@ class OpenDB:
                 self.commit()
 
 
-    def update(self, table_name, column_names, values, search_condition, print_statement=True, print_report=False, force_commit=True):
+    def update(self, table_name, column_names, values, search_condition, print_report=True, force_commit=True):
         '''
         Parameters
         ----------
         :table_name: str
         :column_names: str or list/tuple
         :values: str or list/tuple of str
-        :search_condition: full search condition
+        :search_condition: search condition clauses, str or list
         '''
         if print_report:
             search_len = self.count_rows(table_name, search_condition)
 
         statement = f'''UPDATE {table_name}\nSET '''        
         if isinstance(column_names,list) or isinstance(column_names,tuple):
-            statement += f'''{column_names[0]} = {values[0]}'''
-            set_size = len(column_names)
-            for i in range(1,set_size):
-                statement += f''',\n\t{column_names[i]} = {values[i]}'''
+            columns_len = len(column_names)
+            statement += f'''{column_names[0]} = ?'''
+            if columns_len > 1:
+                for i in range(1,columns_len):
+                    statement += f''',\n\t{column_names[i]} = ?'''
         else:
-            statement += f'''{column_names} = {values}'''
-        statement += f'''\nWHERE {search_condition};'''             
-        if print_statement:
-            print(statement)
+            statement += f'''{column_names} = ?'''
+
+        if isinstance(search_condition,list) or isinstance(search_condition,tuple):
+            where_len = len(search_condition)
+            statement += f'''\nWHERE {search_condition}''' 
+            if where_len > 1:
+                for i in range(1,where_len):
+                    statement += f''',\n\tAND {search_condition[i]}'''
+            statement += ';'
+        else:
+            statement += f'''\nWHERE {search_condition};''' 
+        
         try:
-            self.cursor.execute(statement)
+            self.cursor.execute(statement,values)
         except Exception as e:
             self.connection.rollback()
             print(f'ERROR: {__name__}.update. {e}')
             print(f'\nStatement:\n----------\n{statement}')
         else:
             if print_report:
-                print(f'update SUCCESSFUL. Changed {search_len} rows')        
+                print(f'SUCCESS: {__name__}.insert. Updated rows: {search_len}')       
+                print(f'\nStatement:\n----------\n{statement}')
+            if force_commit:
+                self.commit()
+
 
     def replace(self, table_name, column_names, values, print_report=True, force_commit=True):
-        '''
+        """
         Parameters
         ----------
         :table_name: str
-        :column_names: str or list/tuple of str
-        :values: list/tuple
-        '''
+        :column_names: str or list/tuple
+        :values: str, list/tuple, list of lists
+        """
         execute_many = False
         if print_report:
             search_len = self.count_rows(prettify_return=True)
             values_len = len(values)
 
-        if isinstance(column_names,list) or isinstance(column_names,tuple): # todo - add case when 1 col & many vals
-            statement = f'''INSERT OR REPLACE INTO {table_name} ({', '.join(column_names)})\nVALUES(?{',?'*(len(column_names)-1)})'''
-            if isinstance(values[0],list) or isinstance(values[0],tuple):
-                execute_many = True
+        if isinstance(column_names,list) or isinstance(column_names,tuple):
+            if len(column_names) > 1:
+                statement = f'''INSERT OR REPLACE INTO {table_name} ({', '.join(column_names)})\nVALUES(?{',?'*(len(column_names)-1)})'''
+                if isinstance(values[0],list) or isinstance(values[0],tuple):
+                    execute_many = True
+            else: 
+                statement = f'''INSERT OR REPLACE INTO {table_name} ({column_names})\nVALUES(?)'''
+                if isinstance(values,list) or isinstance(values,tuple):
+                    execute_many = True
         else:
-            statement = f'''INSERT OR REPLACE INTO {table_name} ({column_names})\n VALUES (?)'''
-            values = (values,)
+            statement = f'''INSERT OR REPLACE INTO {table_name} ({column_names})\nVALUES(?)'''
+            if isinstance(values,str):
+                values = (values,)
         try:
             if execute_many:
                 self.cursor.executemany(statement, values)
@@ -379,13 +448,22 @@ class OpenDB:
             if print_report:
                 delta_len = self.count_rows(prettify_return=True) - search_len
                 print(f'SUCCESS: {__name__}.replace. Added rows: {delta_len}/{values_len}')
-                print(f'\nStatement:\n----------\n{statement}')            
+                print(f'\nStatement:\n----------\n{statement}')
             if force_commit:
                 self.commit()
 
-
-    def delete(self, table_name, search_condition, print_report=False, force_commit=True):
+    def delete(self, table_name, search_condition, print_report=True, force_commit=True):
         statement = f'''DELETE FROM {table_name}\nWHERE {search_condition};'''
+        if isinstance(search_condition,list) or isinstance(search_condition,tuple):
+            where_len = len(search_condition)
+            statement += f'''\nWHERE {search_condition}''' 
+            if where_len > 1:
+                for i in range(1,where_len):
+                    statement += f''',\n\tAND {search_condition[i]}'''
+            statement += ';'
+        else:
+            statement += f'''\nWHERE {search_condition};''' 
+       
         if print_report:
             search_len = self.count_rows(table_name, search_condition)
         try:
@@ -415,7 +493,7 @@ class OpenDB:
             else:
                 if force_commit:
                     self.commit()
-
+        
         if no_errors:
             statement = f'''DROP TABLE {table_name};'''
 
@@ -430,7 +508,7 @@ class OpenDB:
                     print(f'SUCCESS: Removed {table_name}')
                 if force_commit:
                     self.commit()       
-
+           
         if no_errors and disable_foreign_keys:
             try:
                 self.cursor.execute('PRAGMA foreign_keys = ON;')
@@ -440,6 +518,7 @@ class OpenDB:
             else:
                 if force_commit:
                     self.commit()   
+
 
     def alter_table(self, table_name, new_table_name, print_report=False, force_commit=True): 
         statement = f'''ALTER TABLE {table_name}\nRENAME TO {new_table_name};'''
@@ -456,6 +535,7 @@ class OpenDB:
             if force_commit:
                 self.commit()
 
+
     def rename_column(self, table_name, column_name, new_column_name, print_report=False, force_commit=True):
         statement = f'''ALTER TABLE {table_name}\nRENAME COLUMN {column_name} TO {new_column_name};'''
         try:
@@ -471,11 +551,12 @@ class OpenDB:
             if force_commit:
                 self.commit()
 
-
+    
 class ContextOpenDB(OpenDB):
 
     def __enter__(self): # context function
         return self
+
 
     def __exit__(self, ext_type, exc_value, traceback):
         self.cursor.close()
@@ -483,4 +564,4 @@ class ContextOpenDB(OpenDB):
             self.connection.rollback()
         else:
             self.connection.commit()
-        self.connection.close() 
+        self.connection.close()
