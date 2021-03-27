@@ -4,26 +4,33 @@
 Gives ability to operate sqlite database as object or context manager object with list-input based methods.
 Compatible with IPython scripts. Limited support for pandas.
 Only simpliest SQL statements. There's no data checking and protection against SQL injection as well.
-Doesn't support table names and column names with space (' ') and aphostropes (') in it.
+Limited support for tables, where names and column names have space (' ') and aphostropes (').
 """
 
 # %%
 import sqlite3
 
 __author__ = 'Dmitriy Sidov'
-__version__ = '0.2'
+__version__ = '0.3'
 __maintainer__ = 'Dmitriy Sidov'
 __email__ = 'dmitriy.sidov@gmail.com'
 __status__ = 'Bug hunt time!'
 
 # %%
-class OpenDB:
+class SQLiteDB:
+
+    def _add_table(self):
+        return SQLiteDB.Table(self)
+
+    class Table:
+        def __init__(self, name):
+            pass
 
     @staticmethod
     def _convert_tuple(result_tuple):
         # Convert tuples to list and val-in-tuple-in-list to val-in-list : [('val1',), ('val2',)] -> ['val1','val2']
         if len(result_tuple) == 0:
-            return None
+            return list()
         else:
             result_list = list()
             if len(result_tuple[0]) == 1:
@@ -59,7 +66,6 @@ class OpenDB:
         except Exception as e:
             print(f'ERROR: {__name__}.commit. {e}') 
 
-
     def tables(self, prettify_return=True):
         """
         Parameter
@@ -85,7 +91,8 @@ class OpenDB:
             self.connection.rollback()
             print(f'{__name__}.schema ERROR. {e}')
         if prettify_return:
-            result = result[0]
+            if result is not None:
+                result = result[0]
         return result
 
 
@@ -94,12 +101,38 @@ class OpenDB:
         if values = None - excute(x=a)
         if values is not None - execute(x=?, val)
         """
+        execute_many = False
         try:
             if values is None:
                 self.cursor.execute(statement)
             else:
-                self.cursor.execute(statement, values)
+                if isinstance(values,list) or isinstance(values,tuple):
+                    quest_marks = 0 # counting ? in statement
+                    quest_set = {'?',',','(',')',' '}
+                    for i in range(statement.find('VALUES')+6,len(statement)):
+                        if statement[i] == '?':
+                            quest_marks += 1
+                        elif statement[i] not in quest_set:
+                            break
+                    if isinstance(values[0],list) or isinstance(values[0],tuple): 
+                        execute_many = True
+                    elif (quest_marks == 1) and (len(values) > 1):
+                        if isinstance(values,tuple): # because you can't change tuple
+                            values = list(values)
+                        for i in range(0,len(values)):
+                            if not (isinstance(values[i],list) or isinstance(values[i],tuple)):
+                                values[i] = (values[i],)
+                        execute_many = True
+                else:
+                    values = (values,)
+                
+                if execute_many:
+                    self.cursor.executemany(statement, values)
+                else:
+                    self.cursor.execute(statement, values)
+            
             result = self.cursor.fetchall()
+        
         except Exception as e:
             self.connection.rollback()
             print(f'ERROR: {__name__}.execute. {e}')
@@ -108,28 +141,6 @@ class OpenDB:
         else:
             if print_report:
                 print(f'SUCCESS: {__name__}.execute.')
-                print(f'\nStatement:\n----------\n{statement}')
-            if force_commit:
-                self.commit()
-            if prettify_return:
-                result = self._convert_tuple(result)
-            return result
-
-    def execute_many(self, statement, values, prettify_return=True, print_report=True, force_commit=True):
-        """
-        statement: full SQL statement with ? on val places
-        """
-        try:
-            self.cursor.executemany(statement, values)
-            result = self.cursor.fetchall()
-        except Exception as e:
-            self.connection.rollback()
-            print(f'ERROR: {__name__}.execute_many. {e}')
-            print(f'\nStatement:\n----------\n{statement}')
-            return None
-        else:
-            if print_report:
-                print(f'SUCCESS: {__name__}.execute_many.')
                 print(f'\nStatement:\n----------\n{statement}')
             if force_commit:
                 self.commit()
@@ -220,7 +231,7 @@ class OpenDB:
                 self.commit()
 
 
-    def select(self, table_name, column_names, distinct=False, join=None, where=None, order_by=None, limit_offset=None, group_by=None, having=None, prettify_return=True, print_report=False, force_commit=True):
+    def select(self, table_name, column_names, distinct=False, join=None, where=None, order_by=None, limit_offset=None, group_by=None, having=None, prettify_return=True, print_report=True, force_commit=True):
         '''
         Parameters
         ----------
@@ -299,7 +310,7 @@ class OpenDB:
         if having is not None:
             statement += f'''\nHAVING {having}'''
 
-        statement = f'\n;'
+        statement += f'\n;'
 
         try:
             self.cursor.execute(statement)
@@ -481,7 +492,7 @@ class OpenDB:
                 self.commit()
 
 
-    def drop_table(self, table_name, disable_foreign_keys=False, print_report=False, force_commit=True):
+    def drop_table(self, table_name, disable_foreign_keys=False, print_report=True, force_commit=True):
         no_errors = True
         if disable_foreign_keys:
             try:
@@ -505,7 +516,7 @@ class OpenDB:
                 no_errors = False
             else:
                 if print_report:
-                    print(f'SUCCESS: Removed {table_name}')
+                    print(f'SUCCESS: {table_name} was dropped')
                 if force_commit:
                     self.commit()       
            
@@ -520,7 +531,7 @@ class OpenDB:
                     self.commit()   
 
 
-    def alter_table(self, table_name, new_table_name, print_report=False, force_commit=True): 
+    def alter_table(self, table_name, new_table_name, print_report=True, force_commit=True): 
         statement = f'''ALTER TABLE {table_name}\nRENAME TO {new_table_name};'''
         try:
             self.cursor.execute(statement)
@@ -536,7 +547,7 @@ class OpenDB:
                 self.commit()
 
 
-    def rename_column(self, table_name, column_name, new_column_name, print_report=False, force_commit=True):
+    def rename_column(self, table_name, column_name, new_column_name, print_report=True, force_commit=True):
         statement = f'''ALTER TABLE {table_name}\nRENAME COLUMN {column_name} TO {new_column_name};'''
         try:
             self.cursor.execute(statement)
@@ -552,7 +563,7 @@ class OpenDB:
                 self.commit()
 
     
-class ContextOpenDB(OpenDB):
+class SQLiteContexDB(SQLiteDB):
 
     def __enter__(self): # context function
         return self
