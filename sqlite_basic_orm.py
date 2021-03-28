@@ -11,10 +11,10 @@ Limited support for tables, where names and column names have space (' ') and ap
 import sqlite3
 
 __author__ = 'Dmitriy Sidov'
-__version__ = '0.4'
+__version__ = '0.5'
 __maintainer__ = 'Dmitriy Sidov'
 __email__ = 'dmitriy.sidov@gmail.com'
-__status__ = 'Bug hunt time!'
+__status__ = 'Under pressure'
 
 # %%
 class SQLiteDB:
@@ -30,12 +30,18 @@ class SQLiteDB:
     def _convert_tuple(result_tuple):
         # Convert tuples to list and val-in-tuple-in-list to val-in-list : [('val1',), ('val2',)] -> ['val1','val2']
         if len(result_tuple) == 0:
-            return list()
+            return None
         else:
             result_list = list()
             if len(result_tuple[0]) == 1:
                 for tuples in result_tuple:
                     result_list.append(tuples[0])
+            elif len(result_tuple) == 1:
+                if isinstance(result_tuple, tuple):
+                    result_list = list(result_tuple[0])
+                else:
+                    result_list = result_tuple[0]
+
             else:
                 for tuples in result_tuple:
                     result_list.append(list(tuples))                   
@@ -147,7 +153,7 @@ class SQLiteDB:
         unique: str or list
             Example: ['column_name1','column_name2']
         primary_key: str
-        foreign_key_lists: list / list of lists
+        foreign_key: list / list of lists
             List structure: ['column_name1', 'reference_table', 'reference_column_name', 'additional actions']
         print_report: boolean 
             Gives simple report if there were no errors.
@@ -169,17 +175,20 @@ class SQLiteDB:
                 statement += f',\n\tUNIQUE ({unique})'
 
         if primary_key is not None:
-            statement += f',\n\tPRIMARY KEY ({primary_key})'
+            if isinstance(primary_key,list) or isinstance(primary_key,tuple):
+                statement += f''',\n\tPRIMARY KEY ({', '.join(primary_key)})'''
+            else:
+                statement += f',\n\tPRIMARY KEY ({primary_key})'
 
         if foreign_key is not None:
             if (isinstance(foreign_key[0],list) or isinstance(foreign_key[0],tuple)) and (len(foreign_key) > 1):
                 for keys in foreign_key:
-                    statement += f''',\n\tFOREIGN KEY ({keys[0]}) \n\tREFERENCES {keys[1]} ({keys[2]}) '''
+                    statement += f''',\n\tFOREIGN KEY ({keys[0]}) \n\t\tREFERENCES {keys[1]} ({keys[2]})'''
                     if len(keys) > 3:
                         for i in range(3,len(keys)):
                             statement += f'\n\t\t{keys[i]}'
             else:
-                statement += f''',\n\tFOREIGN KEY ({foreign_key[0]}) \n\tREFERENCES {foreign_key[1]} ({foreign_key[2]}) '''
+                statement += f''',\n\tFOREIGN KEY ({foreign_key[0]}) \n\t\tREFERENCES {foreign_key[1]} ({foreign_key[2]})'''
                 if len(foreign_key) > 3:
                     for i in range(3,len(foreign_key)):
                         statement += f'\n\t\t{foreign_key[i]}'
@@ -216,6 +225,7 @@ class SQLiteDB:
             Commit changes after statement execution.  
         '''       
         no_errors = True
+        execute_list = False
         if disable_foreign_keys:
             try:
                 self.cursor.execute('PRAGMA foreign_keys = OFF;')
@@ -229,6 +239,7 @@ class SQLiteDB:
         
         if no_errors:
             if isinstance(table_name, list) or isinstance(table_name, tuple): 
+                execute_list = True
                 statements = list()
                 for name in table_name:
                     statements.append(f'''DROP TABLE {name};''')
@@ -236,7 +247,7 @@ class SQLiteDB:
                 statement = f'''DROP TABLE {table_name};'''
             
             try:
-                if isinstance(statements, list): 
+                if execute_list: 
                     for statement in statements:
                         self.cursor.execute(statement)
                 else:
@@ -247,7 +258,7 @@ class SQLiteDB:
                 no_errors = False
             else:
                 if print_report:
-                    print(f'SUCCESS: {table_name} was dropped')
+                    print(f'SUCCESS: {table_name} was dropped.')
                 if force_commit:
                     self.commit()       
            
@@ -275,8 +286,10 @@ class SQLiteDB:
             Gives simple report if there were no errors. Also count removed rows.
         force_commit : boolean (default True)
             Commit changes after statement execution.  
-        '''                  
+        '''    
+        execute_list = False             
         if isinstance(old_name, list) or isinstance(old_name, tuple): 
+            execute_list = True
             statements = list()
             for i in range(len(old_name)):
                 statements.append(f'''ALTER TABLE {old_name[i]}\nRENAME TO {new_name[i]};''')
@@ -284,7 +297,7 @@ class SQLiteDB:
             statement = f'''ALTER TABLE {old_name}\nRENAME TO {new_name};'''
         
         try:
-            if isinstance(statements, list):
+            if execute_list:
                 for statement in statements:
                     self.cursor.execute(statement)
             else:
@@ -292,7 +305,6 @@ class SQLiteDB:
         except Exception as e:
             self.connection.rollback()
             print(f'ERROR: {__name__}.drop_table. {e}')
-            no_errors = False
         else:
             if print_report:
                 print(f'SUCCESS: Tables {old_name} was renamed at {new_name}')
@@ -449,7 +461,7 @@ class SQLiteDB:
                 self.commit() 
 
 
-    def count_rows(self, table_name, search_condition=None, prettify_return=True):
+    def count_rows(self, table_name, search_condition=None):
         '''
         Returns number of items in a table.
 
@@ -473,12 +485,10 @@ class SQLiteDB:
             print(f'\nStatement:\n----------\n{statement}')
             return None
         else:
-            if prettify_return:
-                result = result[0]
-            return result
+            return result[0]
 
 
-    def select(self, table_name, column_names, distinct=False, join=None, where=None, order_by=None, limit_offset=None, group_by=None, having=None, prettify_return=True, print_report=True, force_commit=True):
+    def select(self, table_name, column_names='*', distinct=False, join=None, where=None, order_by=None, limit_offset=None, group_by=None, having=None, prettify_return=True, print_report=True, force_commit=True):
         '''
         Returns query data from a table. Doesn't fully support the SELECT statement.
         Available clauses are shown by arguments.
@@ -526,14 +536,7 @@ class SQLiteDB:
                     statement += f'''\n\t {join[0]} JOIN {join[1]} ON {join[2]}'''
 
         if where is not None:
-            if (isinstance(where,list) or isinstance(where,tuple)):
-                where_len = len(where)
-                statement = f'''WHERE {where[0]}'''
-                if where_len > 1:
-                    for i in range(1,len(where)):
-                        statement += f'''\n\tAND {where[i]}'''
-            else:
-                statement += f'''WHERE {where}'''
+            statement += f'''\nWHERE {where}'''
 
         if order_by is not None:
             if (isinstance(order_by,list) or isinstance(order_by,tuple)):
@@ -543,7 +546,7 @@ class SQLiteDB:
                     for i in range(1,order_len):
                         statement += f''',\n\t{order_by[i]}'''
             else:
-                statement += f'''ORDER BY {order_by}'''
+                statement += f'''\nORDER BY {order_by}'''
 
         if limit_offset is not None:
             if isinstance(limit_offset,list) or isinstance(limit_offset,tuple):
@@ -563,12 +566,12 @@ class SQLiteDB:
                     for i in range(1,group_len):
                         statement += f''',\n\t{group_by[i]}'''
             else:
-                statement += f'''\nGROUP BY {order_by}'''
+                statement += f'''\nGROUP BY {group_by}'''
 
         if having is not None:
             statement += f'''\nHAVING {having}'''
 
-        statement += f'\n;'
+        statement += f';'
 
         try:
             self.cursor.execute(statement)
@@ -589,7 +592,7 @@ class SQLiteDB:
             return result
 
 
-    def insert(self, table_name, column_names, values, print_report=True, force_commit=True):
+    def insert(self, table_name, column_names, values, replace=False, print_report=True, force_commit=True):
         '''
         Insert new row(s) into a table.
 
@@ -598,33 +601,57 @@ class SQLiteDB:
         table_name : str
         column_names: str, list
         values : str, int, list, list of lists
+        replace : boolean
+            Ignore UNIQUE or PRIMARY KEY constraint violation. If True, it deletes existing row and inserting new one.
         print_report : boolean 
             Gives simple report if there were no errors. Also count planned / resulting insertions.
         force_commit : boolean (default True)
             Commit changes after statement execution.  
         '''
         execute_many = False
-        if print_report:
-            search_len = self.count_rows(prettify_return=True)
-            values_len = len(values)
+
+        if replace:
+            ins_or_repl = 'INSERT OR REPLACE INTO'
+        else:
+            ins_or_repl = 'INSERT INTO'
+
         if isinstance(column_names,list) or isinstance(column_names,tuple):
             if len(column_names) > 1:
-                statement = f'''INSERT INTO {table_name} ({', '.join(column_names)})\nVALUES(?{',?'*(len(column_names)-1)})'''
+                statement = f'''{ins_or_repl} {table_name} ({', '.join(column_names)})\nVALUES(?{',?'*(len(column_names)-1)})'''
                 if isinstance(values[0],list) or isinstance(values[0],tuple):
                     execute_many = True
             else: 
-                statement = f'''INSERT INTO {table_name} ({column_names})\nVALUES(?)'''
+                statement = f'''{ins_or_repl} {table_name} ({column_names[0]})\nVALUES(?)'''
                 if isinstance(values,list) or isinstance(values,tuple):
                     execute_many = True
                     if isinstance(values,tuple): # because you can't change tuple
                         values = list(values)
-                        for i in range(0,len(values)):
-                            if not (isinstance(values[i],list) or isinstance(values[i],tuple)):
-                                values[i] = (values[i],)
+                    for i in range(0,len(values)):
+                        if not (isinstance(values[i],list) or isinstance(values[i],tuple)):
+                            values[i] = (values[i],)
+                else:
+                    values = (values,)
         else:
-            statement = f'''INSERT INTO {table_name} ({column_names})\nVALUES(?)'''
-            values = (values,)
+            statement = f'''{ins_or_repl} {table_name} ({column_names})\nVALUES(?)'''
+            if isinstance(values,list) or isinstance(values,tuple):
+                execute_many = True
+                if isinstance(values,tuple): # because you can't change tuple
+                    values = list(values)
+                for i in range(0,len(values)):
+                    if not (isinstance(values[i],list) or isinstance(values[i],tuple)):
+                        values[i] = (values[i],) 
+            else:          
+                values = (values,)
         
+        if print_report:
+            search_len = self.count_rows(table_name)
+            if not (isinstance(values,list) or isinstance(values,tuple)):
+                values_len = 1
+            elif (isinstance(values[0],list) or isinstance(values[0],tuple)) and ((isinstance(column_names,list) or isinstance(column_names,tuple)) and len(column_names) > 1):
+                values_len = 1 # when 1 val list for col list
+            else:
+                values_len = len(values)
+
         try:
             if execute_many:
                 self.cursor.executemany(statement, values)
@@ -636,7 +663,7 @@ class SQLiteDB:
             print(f'\nStatement:\n----------\n{statement}')
         else:
             if print_report:
-                delta_len = self.count_rows(prettify_return=True) - search_len
+                delta_len = self.count_rows(table_name) - search_len
                 print(f'SUCCESS: {__name__}.insert. Added rows: {delta_len}/{values_len}')
                 print(f'\nStatement:\n----------\n{statement}')
             if force_commit:
@@ -669,62 +696,8 @@ class SQLiteDB:
             print(f'\nStatement:\n----------\n{statement}')
         else:
             if print_report:
-                delta_len = self.count_rows(prettify_return=True) - search_len
-                print(f'SUCCESS: {__name__}.insert. Removed rows: {delta_len}')
-                print(f'\nStatement:\n----------\n{statement}')
-            if force_commit:
-                self.commit()
-
-
-    def replace(self, table_name, column_names, values, print_report=True, force_commit=True):
-        '''
-        Similar to insert, but when a UNIQUE or PRIMARY KEY constraint violation occurs, it delete existing row and inserting new one.
-
-        Parameters
-        ----------
-        table_name : str
-        column_names : str, list
-        values : str, list
-        print_report : boolean 
-            Gives simple report if there were no errors. Also count numbers of new/replaced rows.
-        force_commit : boolean (default True)
-            Commit changes after statement execution.  
-        '''
-        execute_many = False
-        if print_report:
-            search_len = self.count_rows(prettify_return=True)
-            values_len = len(values)
-        if isinstance(column_names,list) or isinstance(column_names,tuple):
-            if len(column_names) > 1:
-                statement = f'''INSERT OR REPLACE INTO {table_name} ({', '.join(column_names)})\nVALUES(?{',?'*(len(column_names)-1)})'''
-                if isinstance(values[0],list) or isinstance(values[0],tuple):
-                    execute_many = True
-            else: 
-                statement = f'''INSERT OR REPLACE INTO {table_name} ({column_names})\nVALUES(?)'''
-                if isinstance(values,list) or isinstance(values,tuple):
-                    execute_many = True
-                    if isinstance(values,tuple): # because you can't change tuple
-                        values = list(values)
-                        for i in range(0,len(values)):
-                            if not (isinstance(values[i],list) or isinstance(values[i],tuple)):
-                                values[i] = (values[i],)
-        else:
-            statement = f'''INSERT OR REPLACE INTO {table_name} ({column_names})\nVALUES(?)'''
-            values = (values,)
-       
-        try:
-            if execute_many:
-                self.cursor.executemany(statement, values)
-            else:
-                self.cursor.execute(statement, values)
-        except Exception as e:
-            self.connection.rollback()
-            print(f'ERROR: {__name__}.replace. {e}')
-            print(f'\nStatement:\n----------\n{statement}')
-        else:
-            if print_report:
-                delta_len = self.count_rows(prettify_return=True) - search_len
-                print(f'SUCCESS: {__name__}.replace. Added rows: {delta_len}/{values_len}')
+                delta_len = self.count_rows(table_name) - search_len
+                print(f'SUCCESS: {__name__}.remove. Removed rows: {delta_len}')
                 print(f'\nStatement:\n----------\n{statement}')
             if force_commit:
                 self.commit()
@@ -750,6 +723,7 @@ class SQLiteDB:
             search_len = self.count_rows(table_name, search_condition)
 
         statement = f'''UPDATE {table_name}\nSET '''        
+        
         if isinstance(column_names,list) or isinstance(column_names,tuple):
             columns_len = len(column_names)
             statement += f'''{column_names[0]} = ?'''
@@ -761,6 +735,9 @@ class SQLiteDB:
 
         statement += f'''\nWHERE {search_condition};''' 
         
+        if not (isinstance(values,list) or isinstance(values, tuple)):
+            values = (values,)
+
         try:
             self.cursor.execute(statement,values)
         except Exception as e:
