@@ -11,41 +11,72 @@ Limited support for tables, where names and column names have space (' ') and ap
 import sqlite3
 
 __author__ = 'Dmitriy Sidov'
-__version__ = '0.5'
+__version__ = '0.6'
 __maintainer__ = 'Dmitriy Sidov'
 __email__ = 'dmitriy.sidov@gmail.com'
-__status__ = 'Under pressure'
+__status__ = 'Methods work fine with root db'
 
 # %%
-class SQLiteDB:
+class SQLiteDB(object):
 
-    def _add_table(self):
-        return SQLiteDB.Table(self)
+    def __assign_table(self, table_name):
+        return SQLiteDB.Table(self, table_name)
 
-    class Table:
-        def __init__(self, name):
+
+    def __add_table(self, table_name):
+        setattr(self, table_name, self.__assign_table(table_name))
+
+
+    class Table(object):
+        
+        def _make_dict(self):
+            result = dict()
+            for i in range(len(self.table_info)):
+                result[self.info[i][1]] = list()
+                for j in range(len(self.data)):
+                    result[self.table_info[i][1]].append(self.data[j][i])
+            return result
+
+
+        def __init__(self, SQLiteDB_obj, name):
+            self._SQLiteDB_obj = SQLiteDB_obj
+            self._name = name
+            self.table_info = self.__SQLiteDB_obj.sqlite_table_info(table_name = self._name)
+            self.data = self.__SQLiteDB_obj.sqlite_select(table_name = self._name)
+            self.data_dict = self._make_dict()
+            
+
+        def insert(self):
             pass
+            # print(self._SQLiteDB_obj.select(table_name = name))
+
 
     @staticmethod
-    def _convert_tuple(result_tuple):
-        # Convert tuples to list and val-in-tuple-in-list to val-in-list : [('val1',), ('val2',)] -> ['val1','val2']
-        if len(result_tuple) == 0:
+    def __tuple_to_list(input_tuple):
+        # Convert tuples to list so you can change them
+        if input_tuple is None:
             return None
         else:
             result_list = list()
-            if len(result_tuple[0]) == 1:
-                for tuples in result_tuple:
-                    result_list.append(tuples[0])
-            elif len(result_tuple) == 1:
-                if isinstance(result_tuple, tuple):
-                    result_list = list(result_tuple[0])
-                else:
-                    result_list = result_tuple[0]
-
-            else:
-                for tuples in result_tuple:
-                    result_list.append(list(tuples))                   
+            for tuples in input_tuple:
+                result_list.append(list(tuples))                   
             return result_list
+
+
+    @staticmethod
+    def __prettify_output(input_list):
+    # Convert tuples to list and val-in-tuple-in-list to val-in-list : [('val1',), ('val2',)] -> ['val1','val2']    
+        if input_list is None:
+            return None
+        elif len(input_list) == 1:
+            return input_list[0]
+        elif (len(input_list) > 1) and (len(input_list[0]) == 1):
+            result_list = list()
+            for lists in input_list:
+                result_list.append(lists[0])
+            return result_list
+        else:
+            return input_list
 
 
     def __init__(self, path):
@@ -54,7 +85,7 @@ class SQLiteDB:
             self.cursor = self.connection.cursor()
         except Exception as e:
             print(f'ERROR: {__name__}.__init__. {e}')
-
+        # for columns in self.sqlite:
 
     def __del__(self):
         try:
@@ -66,7 +97,7 @@ class SQLiteDB:
             print(f'ERROR: {__name__}.__del__. {e}')
 
 
-    def commit(self): 
+    def sqlite_commit(self): 
         '''
         Сommit changes to the database.
         '''
@@ -76,7 +107,7 @@ class SQLiteDB:
             print(f'ERROR: {__name__}.commit. {e}') 
 
 
-    def execute(self, statement, values=None, prettify_return=True, print_report=True, force_commit=True):
+    def sqlite_execute(self, statement, values=None, return_list=True, prettify_output=True, print_report=True, force_commit=True):
         '''
         Performs SQL statement to the database. Returns query results.
         
@@ -85,10 +116,10 @@ class SQLiteDB:
         statement : str
         values : str, int, list (optional)
             Can be used for multiple rows insertion. If exists, using syntax (VALUES=?, val) instead (VALUES=val)
-        prettify_return : boolean (default True)
+        prettify_output : boolean (default True)
             Changes output from val-in-tuple-in-list to val-in-list : [('val1',), ('val2',)] -> ['val1','val2']
         print_report : boolean
-            Gives simple report if there were no errors.
+            Gives simple report if there were no errors. Prints statement if error occurs.
         force_commit : boolean (default True)
             Commit changes after statement execution.
         '''
@@ -116,32 +147,33 @@ class SQLiteDB:
                         execute_many = True
                 else:
                     values = (values,)
-                
                 if execute_many:
                     self.cursor.executemany(statement, values)
                 else:
                     self.cursor.execute(statement, values)
-            
             result = self.cursor.fetchall()
-        
+
         except Exception as e:
             self.connection.rollback()
             print(f'ERROR: {__name__}.execute. {e}')
-            print(f'\nStatement:\n----------\n{statement}')
+            if print_report:
+                print(f'\nCheck statement:\n----------------\n{statement}')
             return None
         else:
+            if force_commit:
+                self.sqlite_commit()
+            if return_list:
+                result = self.__tuple_to_list(result)
+            if prettify_output:
+                result = self.__prettify_output(result)
             if print_report:
                 print(f'SUCCESS: {__name__}.execute.')
-                print(f'\nStatement:\n----------\n{statement}')
-            if force_commit:
-                self.commit()
-            if prettify_return:
-                result = self._convert_tuple(result)
+                # print(f'\nCheck statement:\n----------------\n{statement}')
             return result
 
 
     # ----- db methods -----
-    def create_table(self, table_name, column_definitions, unique=None, primary_key=None, foreign_key=None, print_report=True, force_commit=True):
+    def sqlite_create_table(self, table_name, column_definitions, unique=None, primary_key=None, foreign_key=None, print_report=True, force_commit=True):
         '''
         Creates table in the database. 
        
@@ -156,7 +188,7 @@ class SQLiteDB:
         foreign_key: list / list of lists
             List structure: ['column_name1', 'reference_table', 'reference_column_name', 'additional actions']
         print_report: boolean 
-            Gives simple report if there were no errors.
+            Gives simple report if there were no errors. Prints statement if error occurs.
         force_commit: boolean
             Commit changes after statement execution.
         '''
@@ -200,16 +232,17 @@ class SQLiteDB:
         except Exception as e:
             self.connection.rollback()
             print(f'ERROR: {__name__}.create_table. {e}')
-            print(f'\nStatement:\n----------\n{statement}')
+            if print_report:
+                print(f'\nCheck statement:\n----------------\n{statement}')
         else:
+            if force_commit:
+                self.sqlite_commit()
             if print_report:
                 print(f'SUCCESS: {__name__}.create_table.')
-                print(f'\nStatement:\n----------\n{statement}')
-            if force_commit:
-                self.commit()
+                # print(f'\nCheck statement:\n----------------\n{statement}')            
 
 
-    def drop_table(self, table_name, disable_foreign_keys=False, print_report=True, force_commit=True):
+    def sqlite_drop_table(self, table_name, disable_foreign_keys=False, print_report=True, force_commit=True):
         '''
         Removes a table from a table.
 
@@ -220,7 +253,7 @@ class SQLiteDB:
         disable_foreign_keys : boolean (default False)
             Disable a foreign key constraint violations.
         print_report : boolean (default False)
-            Gives simple report if there were no errors. Also count removed rows.
+            Gives simple report if there were no errors. Prints statement if error occurs.
         force_commit : boolean (default True)
             Commit changes after statement execution.  
         '''       
@@ -235,7 +268,7 @@ class SQLiteDB:
                 no_errors = False
             else:
                 if force_commit:
-                    self.commit()
+                    self.sqlite_commit()
         
         if no_errors:
             if isinstance(table_name, list) or isinstance(table_name, tuple): 
@@ -257,11 +290,10 @@ class SQLiteDB:
                 print(f'ERROR: {__name__}.drop_table. {e}')
                 no_errors = False
             else:
+                if force_commit:
+                    self.sqlite_commit() 
                 if print_report:
                     print(f'SUCCESS: {table_name} was dropped.')
-                if force_commit:
-                    self.commit()       
-           
         if no_errors and disable_foreign_keys:
             try:
                 self.cursor.execute('PRAGMA foreign_keys = ON;')
@@ -270,10 +302,10 @@ class SQLiteDB:
                 print(f'ERROR: Enabling foreign_keys in {__name__}.drop_table. {e}. Check foreign_keys status.') 
             else:
                 if force_commit:
-                    self.commit()   
+                    self.sqlite_commit()   
 
 
-    def rename_table(self, old_name, new_name, print_report=True, force_commit=True):
+    def sqlite_rename_table(self, old_name, new_name, print_report=True, force_commit=True):
         '''
         Renames table(s) in a database.
 
@@ -283,7 +315,7 @@ class SQLiteDB:
         new_name : str, list
             If list - names change according to the items order
         print_report : boolean (default False)
-            Gives simple report if there were no errors. Also count removed rows.
+            Gives simple report if there were no errors. Prints statement if error occurs. Also count removed rows.
         force_commit : boolean (default True)
             Commit changes after statement execution.  
         '''    
@@ -306,19 +338,19 @@ class SQLiteDB:
             self.connection.rollback()
             print(f'ERROR: {__name__}.drop_table. {e}')
         else:
+            if force_commit:
+                self.sqlite_commit()
             if print_report:
                 print(f'SUCCESS: Tables {old_name} was renamed at {new_name}')
-            if force_commit:
-                self.commit()     
 
 
-    def tables(self, prettify_return=True):
+    def sqlite_tables(self, prettify_output=True):
         '''
         Returns list of table names in database.
 
         Parameters
         ----------
-        prettify_return : boolean (default True)
+        prettify_output : boolean (default True)
             Changes output from val-in-tuple-in-list to val-in-list : [('val1',), ('val2',)] -> ['val1','val2']
         '''   
         try:
@@ -327,12 +359,12 @@ class SQLiteDB:
         except Exception as e:
             self.connection.rollback()
             print(f'ERROR: {__name__}.tables. {e}')
-        if prettify_return:
-            result = self._convert_tuple(result)
+        if prettify_output:
+            result = self.__prettify_output(result)
         return result
 
 
-    def table_info(self, table_name, prettify_return=True):
+    def sqlite_table_info(self, table_name, prettify_output=True):
         '''
         Returns information about table colunms in list (list of list). 
         
@@ -347,7 +379,7 @@ class SQLiteDB:
         Parameters
         ----------
         table_name : str
-        prettify_return : boolean (default True)
+        prettify_output : boolean (default True)
             Changes output from val-in-tuple-in-list to val-in-list : [('val1',), ('val2',)] -> ['val1','val2']
         '''
         try:
@@ -356,19 +388,18 @@ class SQLiteDB:
         except Exception as e:
             self.connection.rollback()
             print(f'{__name__}.table ERROR. {e}')
-        if prettify_return:
-            if result is not None:
-                result = self._convert_tuple(result)
+        if prettify_output:
+            result = self.__prettify_output(result)
         return result        
 
 
-    def schema(self, table_name, prettify_return=True):
+    def sqlite_schema(self, table_name, prettify_output=True):
         '''
         Returns the structure of а table in the database.
 
         Parameters
         ----------
-        prettify_return : boolean (default True)
+        prettify_output : boolean (default True)
             Changes output from val-in-tuple-in-list to val-in-list : [('val1',), ('val2',)] -> ['val1','val2']
         '''  
         try:
@@ -377,14 +408,14 @@ class SQLiteDB:
         except Exception as e:
             self.connection.rollback()
             print(f'{__name__}.schema ERROR. {e}')
-        if prettify_return:
+        if prettify_output:
             if result is not None:
                 result = result[0]
         return result
 
 
     # ----- table methods -----
-    def add_column(self, table_name, column_definition, print_report=True, force_commit=True):
+    def sqlite_add_column(self, table_name, column_definition, print_report=True, force_commit=True):
         '''
         Adds column(s) in a table.
 
@@ -394,14 +425,14 @@ class SQLiteDB:
         column_definitions: str, list
             Example: 'column_name1 data_type NOT NULL'
         print_report : boolean (default False)
-            Gives simple report if there were no errors. Also count removed rows.
+            Gives simple report if there were no errors. Prints statement if error occurs. Also count removed rows.
         force_commit : boolean (default True)
             Commit changes after statement execution.  
         '''                  
-        if isinstance(table_name, list) or isinstance(table_name, tuple): 
+        if isinstance(column_definition, list) or isinstance(column_definition, tuple): 
             statements = list()
-            for name in table_name:
-                statements.append(f'''ALTER TABLE {table_name}\nADD COLUMN {column_definition};''')
+            for definition in column_definition:
+                statements.append(f'''ALTER TABLE {table_name}\nADD COLUMN {definition};''')
         else: 
             statement = f'''ALTER TABLE {table_name}\nADD COLUMN {column_definition};'''
         
@@ -416,13 +447,13 @@ class SQLiteDB:
             print(f'ERROR: {__name__}.add_column. {e}')
             no_errors = False
         else:
+            if force_commit:
+                self.sqlite_commit() 
             if print_report:
                 print(f'''SUCCESS: Column(s) in {table_name} was added: {column_definition}''')
-            if force_commit:
-                self.commit() 
 
 
-    def rename_column(self, table_name, old_name, new_name, print_report=True, force_commit=True):
+    def sqlite_rename_column(self, table_name, old_name, new_name, print_report=True, force_commit=True):
         '''
         Renames column(s) in a table.
 
@@ -433,7 +464,7 @@ class SQLiteDB:
         new_name : str, list
             If list - names change according to the items order
         print_report : boolean (default False)
-            Gives simple report if there were no errors. Also count removed rows.
+            Gives simple report if there were no errors. Prints statement if error occurs. Also count removed rows.
         force_commit : boolean (default True)
             Commit changes after statement execution.  
         '''                  
@@ -455,13 +486,14 @@ class SQLiteDB:
             print(f'ERROR: {__name__}.rename_columns. {e}')
             no_errors = False
         else:
+            if force_commit:
+                self.sqlite_commit() 
             if print_report:
                 print(f'SUCCESS: Columns in {table_name} was renamed: {old_name} at {new_name}')
-            if force_commit:
-                self.commit() 
 
 
-    def count_rows(self, table_name, search_condition=None):
+
+    def sqlite_count_rows(self, table_name, search_condition=None, print_report=False):
         '''
         Returns number of items in a table.
 
@@ -470,25 +502,25 @@ class SQLiteDB:
         table_name : str
         search_condition : str
             Full sqlite WHERE clause (without WHERE).
-        prettify_return : boolean (default True)
-            Changes output from val-in-tuple-in-list to val-in-list : [('val1',), ('val2',)] -> ['val1','val2']
+        print_report : Prints statement if error occurs.
         '''
         if search_condition is None: 
             statement = f'''SELECT COUNT(*)\nFROM {table_name};'''
         else:
-            statement = f'''SELECT COUNT(*)\nFROM {table_name}\nWHERE {search_condition}'''
+            statement = f'''SELECT COUNT(*)\nFROM {table_name}\nWHERE {search_condition};'''
         try:
             self.cursor.execute(statement)
             result = self.cursor.fetchone()
         except Exception as e:
             print(f'ERROR: {__name__}.count_rows. {e}')
-            print(f'\nStatement:\n----------\n{statement}')
+            if print_report:
+                print(f'\nStatement:\n----------\n{statement}')
             return None
         else:
             return result[0]
 
 
-    def select(self, table_name, column_names='*', distinct=False, join=None, where=None, order_by=None, limit_offset=None, group_by=None, having=None, prettify_return=True, print_report=True, force_commit=True):
+    def sqlite_select(self, table_name, column_names='*', distinct=False, join=None, where=None, order_by=None, limit_offset=None, group_by=None, having=None, return_list=True, prettify_output=True, print_report=True, force_commit=True):
         '''
         Returns query data from a table. Doesn't fully support the SELECT statement.
         Available clauses are shown by arguments.
@@ -510,7 +542,7 @@ class SQLiteDB:
         having: str
             Full sqlite HAVING clause.
         print_report : boolean 
-            Gives simple report if there were no errors.
+            Gives simple report if there were no errors. Prints statement if error occurs.
         force_commit : boolean (default True)
             Commit changes after statement execution.        
         '''
@@ -579,20 +611,23 @@ class SQLiteDB:
         except Exception as e:
             self.connection.rollback()
             print(f'ERROR: {__name__}.select. {e}')
-            print(f'\nStatement:\n----------\n{statement}')
+            if print_report:
+                print(f'\nCheck statement:\n----------------\n{statement}')
             return None
         else:
+            if force_commit:
+                self.sqlite_commit()
+            if return_list:
+                result = self.__tuple_to_list(result)
+            if prettify_output:
+                result = self.__prettify_output(result)
             if print_report:
                 print(f'SUCCESS: {__name__}.select.')
-                print(f'\nStatement:\n----------\n{statement}')
-            if force_commit:
-                self.commit()
-            if prettify_return:
-                result = self._convert_tuple(result)
+                # print(f'\nCheck statement:\n----------------\n{statement}')
             return result
 
 
-    def insert(self, table_name, column_names, values, replace=False, print_report=True, force_commit=True):
+    def sqlite_insert(self, table_name, column_names, values, replace=False, print_report=True, force_commit=True):
         '''
         Insert new row(s) into a table.
 
@@ -600,14 +635,21 @@ class SQLiteDB:
         ----------
         table_name : str
         column_names: str, list
+            Use '*' to insert values into all existing tables in the appropriate order.
         values : str, int, list, list of lists
         replace : boolean
             Ignore UNIQUE or PRIMARY KEY constraint violation. If True, it deletes existing row and inserting new one.
         print_report : boolean 
-            Gives simple report if there were no errors. Also count planned / resulting insertions.
+            Gives simple report if there were no errors. Prints statement if error occurs. Also count planned / resulting insertions.
         force_commit : boolean (default True)
             Commit changes after statement execution.  
         '''
+        if column_names == '*':
+            table_info = self.sqlite_table_info(table_name,prettify_output=False)
+            column_names = list()
+            for columns in table_info:
+                column_names.append(columns[1])
+        
         execute_many = False
 
         if replace:
@@ -644,10 +686,10 @@ class SQLiteDB:
                 values = (values,)
         
         if print_report:
-            search_len = self.count_rows(table_name)
+            search_len = self.sqlite_count_rows(table_name)
             if not (isinstance(values,list) or isinstance(values,tuple)):
                 values_len = 1
-            elif (isinstance(values[0],list) or isinstance(values[0],tuple)) and ((isinstance(column_names,list) or isinstance(column_names,tuple)) and len(column_names) > 1):
+            elif (isinstance(values[0],list) or isinstance(values[0],tuple)) and (len(column_names) == len(values)):
                 values_len = 1 # when 1 val list for col list
             else:
                 values_len = len(values)
@@ -660,17 +702,18 @@ class SQLiteDB:
         except Exception as e:
             self.connection.rollback()
             print(f'ERROR: {__name__}.insert. {e}')
-            print(f'\nStatement:\n----------\n{statement}')
-        else:
             if print_report:
-                delta_len = self.count_rows(table_name) - search_len
-                print(f'SUCCESS: {__name__}.insert. Added rows: {delta_len}/{values_len}')
-                print(f'\nStatement:\n----------\n{statement}')
+                print(f'\nCheck statement:\n----------------\n{statement}')
+        else:
             if force_commit:
-                self.commit()
+                self.sqlite_commit()
+            if print_report:
+                delta_len = self.sqlite_count_rows(table_name) - search_len
+                print(f'SUCCESS: {__name__}.insert. Added rows: {delta_len}/{values_len}')
+                # print(f'\nCheck statement:\n----------------\n{statement}')
 
 
-    def delete(self, table_name, search_condition, print_report=True, force_commit=True):
+    def sqlite_delete(self, table_name, search_condition, print_report=True, force_commit=True):
         '''
         Removes row(s) with search condition from a table.
 
@@ -680,30 +723,30 @@ class SQLiteDB:
         search_condition : str
             Full sqlite WHERE clause.
         print_report : boolean 
-            Gives simple report if there were no errors. Also count removed rows.
+            Gives simple report if there were no errors. Prints statement if error occurs. Also count removed rows.
         force_commit : boolean (default True)
             Commit changes after statement execution.  
         '''
         statement = f'''DELETE FROM {table_name}\nWHERE {search_condition};'''
        
         if print_report:
-            search_len = self.count_rows(table_name, search_condition)
+            search_len = self.sqlite_count_rows(table_name, search_condition)
         try:
             self.cursor.execute(statement)
         except Exception as e:
             self.connection.rollback()
             print(f'ERROR: {__name__}.delete. {e}')
-            print(f'\nStatement:\n----------\n{statement}')
-        else:
             if print_report:
-                delta_len = self.count_rows(table_name) - search_len
-                print(f'SUCCESS: {__name__}.remove. Removed rows: {delta_len}')
-                print(f'\nStatement:\n----------\n{statement}')
+                print(f'\nCheck statement:\n----------------\n{statement}')
+        else:
             if force_commit:
-                self.commit()
+                self.sqlite_commit()
+            if print_report:
+                print(f'SUCCESS: {__name__}.remove. Removed rows: {search_len}')
+                # print(f'\nStatement:\n----------\n{statement}')
 
 
-    def update(self, table_name, column_names, values, search_condition, print_report=True, force_commit=True):
+    def sqlite_update(self, table_name, column_names, values, search_condition, print_report=True, force_commit=True):
         '''
         Update existing data in a table.
 
@@ -711,6 +754,7 @@ class SQLiteDB:
         ----------
         table_name : str
         column_names : str, list
+            Use '*' to update values in all existing tables in the appropriate order.
         values : str, list
         search_condition : str
             Full sqlite WHERE clause.
@@ -719,8 +763,14 @@ class SQLiteDB:
         force_commit : boolean (default True)
             Commit changes after statement execution.  
         '''
+        if column_names == '*':
+            table_info = self.sqlite_table_info(table_name,prettify_output=False)
+            column_names = list()
+            for columns in table_info:
+                column_names.append(columns[1])
+
         if print_report:
-            search_len = self.count_rows(table_name, search_condition)
+            search_len = self.sqlite_count_rows(table_name, search_condition)
 
         statement = f'''UPDATE {table_name}\nSET '''        
         
@@ -743,20 +793,20 @@ class SQLiteDB:
         except Exception as e:
             self.connection.rollback()
             print(f'ERROR: {__name__}.update. {e}')
-            print(f'\nStatement:\n----------\n{statement}')
+            if print_report:
+                print(f'\nCheck statement:\n----------------\n{statement}')
         else:
+            if force_commit:
+                self.sqlite_commit()
             if print_report:
                 print(f'SUCCESS: {__name__}.insert. Updated rows: {search_len}')       
-                print(f'\nStatement:\n----------\n{statement}')
-            if force_commit:
-                self.commit()
+                # print(f'\nCheck statement:\n----------------\n{statement}')
 
 
-class SQLiteContexDB(SQLiteDB):
+class SQLiteContextDB(SQLiteDB):
 
     def __enter__(self): # context function
         return self
-
 
     def __exit__(self, ext_type, exc_value, traceback):
         self.cursor.close()
